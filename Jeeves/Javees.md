@@ -5,7 +5,7 @@
 nmap -sC -sV -T4 -oN scan.txt $ip
 ```
 ## Nmap Result
-![nmap](../../Assets/walktrhough-assets/jeeves/nmap.png)
+![Nmap Result](images/nmap.png)
 
 As I went through the prot `80` and port `50000` i did not find anyting interesting so I starting doing some directory busting by ruing `feroxbuster` on the port `50000`.
 ## Feroxbuster
