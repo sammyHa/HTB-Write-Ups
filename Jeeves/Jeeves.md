@@ -356,7 +356,7 @@ afbc5bd4b615a60648cec41c6ac92530
 ## 5. Conclusion & Lessons Learned
 
 - **Vulnerability:** The primary issue was improperly configured Jenkins authentication, allowing anonymous users to execute code on the underlying system.
-- 
+
 - **PrivEsc Vector:** Hardcoded credentials stored in a KeePass file, protected by a weak password, led to full domain compromise.
     
 - **Defensive Takeaways:**
