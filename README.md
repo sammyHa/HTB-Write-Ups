@@ -1,2 +1,11 @@
-# HTB-Write-Ups
-Only Hack The Box write-ups
+# Hack The Box Write-Ups
+
+A collection of my write-ups for retired Hack The Box machines.
+
+## Machines
+
+| Machine Name | Difficulty | Operating System | Key Skills Learned |
+| :--- | :--- | :--- | :--- |
+| [ScriptKiddie](ScriptKiddie/ScriptKiddie-WriteUp.md) | Easy | Linux | **Command Injection**, **Metasploit Exploit Generation** |
+| [Delivery](Delivery/Delivery-WriteUp.md) | Easy | Linux | **API Testing**, **SUDO Privilege Escalation** |
+| [Academy](Academy/Academy-WriteUp.md) | Medium | Linux | **Subdomain Enumeration**, **LFI to RCE** |
